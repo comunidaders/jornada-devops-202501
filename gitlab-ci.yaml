@@ -1,0 +1,71 @@
+stages:
+  - ci
+  - dev
+  - hml
+  - prd
+
+variables:
+  TF_ROOT: terraform
+
+# Stage de CI
+validate_terraform:
+  stage: ci
+  image: hashicorp/terraform:1.5.6
+  script:
+    - terraform fmt -check
+    - terraform validate
+    - curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install.sh | bash
+    - tflint
+    - curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install.sh | bash
+    - tfsec .
+    - curl -s https://raw.githubusercontent.com/terraform-docs/terraform-docs/main/install.sh | bash
+    - terraform-docs markdown table . > terraform-docs.md
+  artifacts:
+    paths:
+      - terraform-docs.md
+    expire_in: 1 day
+
+# Deploy para DEV
+deploy_dev:
+  stage: dev
+  image: hashicorp/terraform:1.5.6
+  dependencies:
+    - validate_terraform
+  script:
+    - terraform workspace select dev || terraform workspace new dev
+    - terraform init
+    - terraform plan -var-file=dev.tfvars -out=tfplan-dev
+  artifacts:
+    paths:
+      - tfplan-dev
+    expire_in: 1 day
+
+# Deploy para HML
+deploy_hml:
+  stage: hml
+  image: hashicorp/terraform:1.5.6
+  dependencies:
+    - deploy_dev
+  script:
+    - terraform workspace select hml || terraform workspace new hml
+    - terraform init
+    - terraform plan -var-file=hml.tfvars -out=tfplan-hml
+  artifacts:
+    paths:
+      - tfplan-hml
+    expire_in: 1 day
+
+# Deploy para PRD
+deploy_prd:
+  stage: prd
+  image: hashicorp/terraform:1.5.6
+  dependencies:
+    - deploy_hml
+  script:
+    - terraform workspace select prd || terraform workspace new prd
+    - terraform init
+    - terraform plan -var-file=prd.tfvars -out=tfplan-prd
+  artifacts:
+    paths:
+      - tfplan-prd
+    expire_in: 1 day
