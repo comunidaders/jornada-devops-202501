@@ -1,0 +1,116 @@
+trigger:
+  branches:
+    include:
+      - main
+
+stages:
+  - stage: CI
+    displayName: Continuous Integration
+    jobs:
+      - job: ValidateTerraform
+        displayName: Validate Terraform Code
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Checkout@v2
+
+          # Setup Terraform
+          - script: |
+              curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install.sh | bash
+              curl -s https://raw.githubusercontent.com/aquasecurity/tfsec/master/scripts/install.sh | bash
+              curl -s https://raw.githubusercontent.com/terraform-docs/terraform-docs/main/install.sh | bash
+            displayName: Install Terraform Tools
+
+          # Terraform Format Check
+          - script: terraform fmt -check
+            workingDirectory: terraform
+            displayName: Check Terraform Format
+
+          # Terraform Validate
+          - script: terraform validate
+            workingDirectory: terraform
+            displayName: Validate Terraform Code
+
+          # Run TFLint
+          - script: tflint
+            workingDirectory: terraform
+            displayName: TFLint Check
+
+          # Run TFSec
+          - script: tfsec .
+            workingDirectory: terraform
+            displayName: TFSec Security Check
+
+          # Generate Terraform Documentation
+          - script: terraform-docs markdown table . > terraform-docs.md
+            workingDirectory: terraform
+            displayName: Generate Terraform Documentation
+
+  - stage: Deploy_Dev
+    displayName: Deploy to Dev
+    dependsOn: CI
+    jobs:
+      - job: Deploy
+        displayName: Deploy to Dev Environment
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Checkout@v2
+
+          # Terraform Init and Plan for Dev
+          - script: |
+              terraform workspace select dev || terraform workspace new dev
+              terraform init
+              terraform plan -var-file=dev.tfvars -out=tfplan-dev
+            workingDirectory: terraform
+            displayName: Terraform Init and Plan - Dev
+
+          # Upload Plan as Artifact
+          - publish: terraform/tfplan-dev
+            artifact: terraform-plan-dev
+
+  - stage: Deploy_HML
+    displayName: Deploy to HML
+    dependsOn: Deploy_Dev
+    jobs:
+      - job: Deploy
+        displayName: Deploy to HML Environment
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Checkout@v2
+
+          # Terraform Init and Plan for HML
+          - script: |
+              terraform workspace select hml || terraform workspace new hml
+              terraform init
+              terraform plan -var-file=hml.tfvars -out=tfplan-hml
+            workingDirectory: terraform
+            displayName: Terraform Init and Plan - HML
+
+          # Upload Plan as Artifact
+          - publish: terraform/tfplan-hml
+            artifact: terraform-plan-hml
+
+  - stage: Deploy_PRD
+    displayName: Deploy to PRD
+    dependsOn: Deploy_HML
+    jobs:
+      - job: Deploy
+        displayName: Deploy to PRD Environment
+        pool:
+          vmImage: ubuntu-latest
+        steps:
+          - task: Checkout@v2
+
+          # Terraform Init and Plan for PRD
+          - script: |
+              terraform workspace select prd || terraform workspace new prd
+              terraform init
+              terraform plan -var-file=prd.tfvars -out=tfplan-prd
+            workingDirectory: terraform
+            displayName: Terraform Init and Plan - PRD
+
+          # Upload Plan as Artifact
+          - publish: terraform/tfplan-prd
+            artifact: terraform-plan-prd
